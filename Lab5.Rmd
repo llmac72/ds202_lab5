@@ -1,0 +1,249 @@
+---
+title: "Lab5"
+author: "Lisa McDaniel"
+date: "11/5/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load libraries and datasets.  Named the dataframes *accidents* and *persons*.
+
+```{r, message=FALSE}
+library(readxl)
+library(tidyverse)
+library(dplyr)
+library(lubridate)
+library(maps)
+
+accidents <- read_excel('C:/Users/Lisa.McDaniel/Documents/DS202/Lab5/FARS.xlsx', 
+                        sheet="accidents")
+
+persons <- read_excel('C:/Users/Lisa.McDaniel/Documents/DS202/Lab5/FARS.xlsx', 
+                         sheet="persons")
+
+```
+
+1.	Are there some days of the week where more accidents happen than the others (see FARS manual, use variable DAY_WEEK)?
+
+**Answer:**  It appears that Wednesday is the turning point; accidents start to increase on Wednesday before reaching a maximum on Saturday.  There is a significant decrease in accidents between Saturday and Sunday and then another significant decrease between Sunday and Monday.  There is a slight decrease in accidents between Monday and Wednesday. 
+
+```{r message= FALSE, fig.width=6,fig.height=5}
+
+DoW <- accidents %>%
+  filter(DAY_WEEK != "NA") %>%
+  mutate(DoW  = wday(DAY_WEEK, label = TRUE))%>%
+  select(DAY_WEEK, DoW) %>%
+  count(DoW, na.rm=TRUE)
+
+ggplot(DoW, aes(DoW, n, fill=DoW)) + 
+  geom_bar(stat = "identity") +
+  ggtitle("Accidents by Day") + labs(x="", y="") +
+  theme(legend.position = "none") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(axis.ticks.y=element_blank()) +
+  theme(axis.text.y = element_blank()) +
+  geom_text(aes(x=DoW,y=n,label=n),vjust=-0.5, size =4)
+```
+
+2.	Create a data frame containing the persons who are fatally hurt in the accidents (look up variable INJ_SEV).
+
+**Answer:**  Created a dataframe called *Injury*.  The first 5 rows are displayed in the output.
+
+```{r message= FALSE}
+
+Injury <- persons %>%
+  filter(INJ_SEV == 4)
+
+head(Injury, n=5) 
+
+```
+
+3.	Create a data frame containing the most dangerous vehicle make in each state. The number of persons fatally hit in the vehicle make is used to assess the (non-)safety of a make. Make sure to handle the missing values appropriately (look up variable MAKE).
+
+**Answer:**  Created a dataframe called *DanVeh* using the *Injury* dataframe created in question 2.  Only showing the first 6 rows of the dataframe in the output.
+
+```{r message= FALSE}
+
+DanVeh <- Injury %>%
+  select(STATE, INJ_SEV, MAKE) %>%
+  filter(MAKE != "NA") %>%
+  group_by(STATE, MAKE) %>%
+  count(MAKE) %>%
+  group_by(STATE) %>%
+  top_n(n=1, n) %>%
+  mutate(MAKE = as.character(MAKE)) %>%
+  mutate(Vehicle = str_replace_all(MAKE, c("49" = "Toyota",                                           "CULVERT EXTENSION|CULVERT REPAIR" = "Maintenance",
+                                           "12" = "Ford",
+                                           "20" = "Chevrolet",
+                                           "37" = "Honda"))) %>%
+  rename(`State Code` = STATE)
+
+head(DanVeh)
+
+```
+
+4.	Create a map, and label each state with the most dangerous vehicle. Discuss the definition of the most dangerous vehicle, and what you find from the map. (Hint: Read the description for the STATE and COUNTY columns in the FARS manual. The state & county codes are Geographic Locator Codes (GLCs) from the General Services Administration’s (GSA) publication. Use readxl::read_xlsx to read in the GLCs.)
+
+**Answer:**  Downloaded the file from the GSA publication and named it *GLCUS*, next I obtained latitude and longitude for the center of each state and named that dataframe *latlong*.  I took the *latlong* dataframe and converted the *State* name column to all lower case.  I trimmed the *GLCUS* so that there were not duplicated rows with *State Name* and *State Code* and named the modified dataframe *st*.  Next, I joined the *st* dataframe with the *DanVeh* (question 3) and coverted the *State Name* to lower case and saved in a new column named *State*.  Then I created a *states* dataframe using the *map_data* command and joined it with the *Vehicle* dataframe named *auto*.  I filtered Alaska and Hawaii from the *auto* dataframe because the *states* dataframe doesn't contain information for these states before creating the map.  The vehicle make in Colorado isn't legible because there was a tie and I couldn't figure out how to seperate them.  Same with Vermont.
+
+```{r message= FALSE, warning=FALSE}
+
+GLCUS <- read_excel('C:/Users/Lisa.McDaniel/Documents/DS202/Lab5/GLC_US.xlsx')
+
+latlong <- read_excel('C:/Users/Lisa.McDaniel/Documents/DS202/Lab5/latlong.xlsx')
+
+latlong <- latlong %>%
+  mutate(State = tolower(name)) %>%
+  select(-name, -state)
+
+st <- GLCUS %>%
+  distinct(`State Code`, `State Name`)
+
+Vehicle <- st %>% 
+  inner_join(DanVeh) %>%
+  mutate(State = tolower(`State Name`))
+
+states <- map_data('state')
+
+auto <- Vehicle %>%
+  left_join(latlong)%>%
+  filter(State != "alaska") %>%
+  filter(State != "hawaii")
+
+ggplot(states, aes(x=long, y=lat),) + 
+  geom_path(aes(group=group)) + 
+  geom_polygon(aes(group=group), colour='black', fill=NA) +
+  geom_text(data=auto, aes(x=longitude, y=latitude, label = Vehicle), size=1.75) 
+
+```
+
+5.	Join the accident and person table (work out which variable(s) to use).
+
+**Answer:** Joined the *persons* and *accidents* dataframes and named the new dataframe *PerAcc*.  Showing the first 6 rows of the *PerAcc* dataframe in the output.
+
+```{r message= FALSE}
+
+PerAcc <- persons %>% 
+  left_join(accidents)
+
+head(PerAcc) 
+
+```
+
+6.	Tally the number of accidents by day of the week (DAY_WEEK), hour of the day (HOUR) and gender (SEX). Visualize the results.
+
+**Answer:** Named the new dataframe *PerAcc1* and used it to make a series of plots showing the number of accidents by state, day and hour.
+
+```{r message= FALSE}
+
+PerAcc1 <- PerAcc %>%
+  filter(DAY_WEEK != "NA", HOUR != "NA", SEX != ("NA")) %>%
+  filter(HOUR != 99) %>%
+  mutate(DoW  = wday(DAY_WEEK, label = TRUE))%>%
+  select(DAY_WEEK, DoW, HOUR, SEX) %>%
+  group_by(DoW, HOUR, SEX)%>%
+  tally()
+
+ggplot(PerAcc1, aes(DoW, n, fill=SEX)) + 
+  geom_bar(stat = "identity") + labs(x="Day", y="Accidents") +
+  ggtitle("Accidents by Day/Hour") + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(axis.text.x = element_text(angle=90, hjust=0, size=8, vjust = 0)) +
+  facet_wrap(~HOUR)
+
+```
+
+7.	Now plot a choropleth map of the number of deaths on a county level.
+
+**Answer:**  Map created.
+
+```{r message= FALSE}
+
+StCo <- GLCUS %>%
+  distinct(`State Code`, `State Name`, `County Code`, `County Name`) %>%
+  rename(STATE = `State Code`, COUNTY = `County Code`) %>%
+  mutate(COUNTY = as.numeric(COUNTY))
+
+county <- PerAcc %>%
+  select(STATE, INJ_SEV, COUNTY, LATITUDE, LONGITUD)%>%
+  filter(INJ_SEV == 4) %>%
+  left_join(StCo) %>%
+  group_by(STATE, COUNTY, LATITUDE, LONGITUD)
+
+ggplot(states, aes(x=long, y=lat)) + geom_polygon(aes(group=group)) + 
+  geom_point(data=county, aes(x=LONGITUD, y=LATITUDE), color='lightgreen', size=0.02, alpha=0.2) +
+  coord_map(xlim=c(-130, -60), ylim=c(20, 50))
+
+
+```
+
+8a.	Is summer or winter more dangerous? 
+
+**Answer:**  Summer has more accidents by about 1500, which makes sense because there is probably more people traveling in the summer months.
+
+```{r message= FALSE}
+
+Sea1 <- accidents %>%
+  select(STATE, MONTH) %>%
+  filter(MONTH != 99 & MONTH !=3 & MONTH !=4 &
+           MONTH !=5 & MONTH !=6 & MONTH !=10 & 
+           MONTH != 11) %>%
+  mutate(Month  = month(MONTH, label = TRUE)) %>%
+  select(-MONTH)%>%
+  mutate(Season = str_replace_all(Month, c("Jan" = "Winter",
+                  "Feb" = "Winter", "Dec" = "Winter", "Jul" = "Summer",
+                  "Aug" = "Summer", "Sep" = "Summer"))) %>%
+  group_by(Season) %>%
+  count(Season)
+
+ggplot(Sea1, aes(Season, n, fill=Season)) + 
+  geom_bar(stat = "identity") + labs(x="Season", y="Accidents") +
+  ggtitle("Accidents by Season") + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_text(aes(x=Season,y=n,label=n),vjust=-0.5, size =4) +
+  theme(axis.ticks.x=element_blank()) +
+  theme(axis.ticks.y=element_blank()) +
+  theme(axis.text.x = element_blank()) +
+  theme(axis.text.y = element_blank())
+
+
+```
+
+8b.	Does this depend on states? Explore and explain.  
+**Answer:**  Generally, there are more accidents in the summer then winter.  If there are more accidents in the winter, the difference is minimal, except in Florida and Hawaii.  These two states have more accidents in the winter than the summer by a significant amount.  These states are attractive winter vacation states, thereby increasing traffic and accidents.
+
+
+```{r fig.height=11, fig.width=10, message=FALSE}
+
+Sea2 <- accidents %>%
+  select(STATE, MONTH) %>%
+  filter(MONTH != 99 & MONTH !=3 & MONTH !=4 &
+           MONTH !=5 & MONTH !=6 & MONTH !=10 & 
+           MONTH != 11) %>%
+  mutate(Month  = month(MONTH, label = TRUE)) %>%
+  select(-MONTH)%>%
+  rename(`State Code` = STATE) %>%
+  inner_join(st) %>%
+  mutate(Season = str_replace_all(Month, c("Jan" = "Winter",
+                                           "Feb" = "Winter", "Dec" = "Winter", "Jul" = "Summer",
+                                           "Aug" = "Summer", "Sep" = "Summer"))) %>%
+
+  group_by(`State Name`, Season) %>%
+  count(Season)
+  
+ggplot(Sea2, aes(Season, n, fill=Season)) + 
+  geom_bar(stat = "identity") + labs(x="", y="") +
+  ggtitle("Accidents by State & Season") + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  facet_wrap(~`State Name`, scales = "free") +
+  theme(axis.ticks.x=element_blank()) +
+  theme(axis.ticks.y=element_blank()) +
+  theme(axis.text.x = element_blank()) +
+  theme(axis.text.y = element_blank()) +
+  geom_text(aes(x=Season,y=n,label=n),vjust=2, size =3)
+
+
+```
